@@ -1,0 +1,320 @@
+---
+title: "Phi2 Predictions"
+author: "Hesborn Obura"
+date: "1/18/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r loading_packages, include = F}
+
+library(tidyverse)
+library(GGally)
+library(scatterplot3d)
+library(lme4)
+library(randomForest)
+library(caTools)
+library(caret)
+library(e1071)
+library(plyr)
+library(lme4)
+library(lmerTest)
+library(emmeans)
+library(minpack.lm)
+library(factoextra) 
+
+```
+
+
+
+```{r importing data, include = F}
+
+df <- read_csv("../data/cleaned/dataset_combined.csv")
+
+#change categorical columns to factors
+df$accession <- as.factor(as.character(df$accession))
+df$Tissue_type <- as.factor(df$Tissue_type)
+df$User <- as.factor(df$User)
+df$device_id <- as.factor(df$device_id)
+df$location <- as.factor(df$location)
+df$blast_score <- as.factor(df$blast_score)
+df$replicate <- as.factor(df$replicate)
+
+df_kil <- df %>% 
+  filter(location == "kilifi")
+
+df_mas <- df %>% 
+  filter(location == "maseno")
+
+
+```
+
+
+
+```{r data manipulation, include = F}
+
+# spliting dataset into corresponding tissue type
+mas_control <- filter(df_mas, Tissue_type == "control")
+mas_infected <- filter(df_mas, Tissue_type == "infected")
+
+# extracting accessions which are in all replicates (1, 2, 3)
+control_full <- mas_control %>%
+  group_by(accession) %>%
+  dplyr::summarize(count_acc = n()) %>%
+  filter(count_acc == 3) %>%
+  select(accession)
+
+
+infected_full <- mas_infected %>%
+  group_by(accession) %>%
+  dplyr::summarize(count_acc = n()) %>%
+  filter(count_acc == 3) %>%
+  select(accession)
+```
+
+
+
+
+```{r,data manipulation}
+# obtaining identical accessions with measurements of all rep in both control and infected
+Contr_infect <- merge(control_full, infected_full)
+
+triple_accessions <- as.character(Contr_infect[1:nrow(Contr_infect),]) # a character vector 
+
+# filtering for identical accessions (having 3 replicates) in both control and infected data in maseno
+df_control <- mas_control%>%
+  filter(accession %in% triple_accessions)
+
+df_infected <- mas_infected %>%
+  filter(accession %in% triple_accessions)
+
+# just double checking on their order
+accession_order <- data.frame(
+  controls_acc = df_control$accession,
+  infected_acc = df_infected$accession,
+  replicate_cont = df_control$replicate,
+  replicate_infe = df_infected$replicate)
+
+write.csv(df_infected, "df_infected.csv")
+```
+
+
+
+```{r data manipulation, include=FALSE}
+# extract x (ppfd_ambient) and y (phi2) values for hyperbolic curve fitting
+# using maseno, control only
+x <- df_control %>% 
+  filter(Tissue_type == "control") %>% 
+  pull(ppfd_ambient)
+
+y <- df_control %>%
+  filter(Tissue_type == "control") %>% 
+  pull(Phi2)
+
+#put into data frame
+df_mod <- data.frame(x,y)
+plot(df_mod)
+```
+
+
+```{r data transformation for hyperbola curve fitting,include=FALSE}
+# log transformation of both the x and y variables
+xlog = log(df_mod$x)
+ylog = log(df_mod$y)
+
+# put into data frame
+df_log <- data.frame(xlog, ylog)
+plot(df_log)
+
+```
+
+
+
+```{r fitting a linear model on log transformed data,include=FALSE}
+# model training
+lmodel <- lm(ylog ~ xlog, data = df_log)
+
+summary(lmodel)
+
+```
+
+
+```{r model training on phi2 and ppfd_ambient,include=FALSE}
+# fitting a non-linear model for phi2 and with corresponding light intensity
+NlM1 <- nlsLM(y ~ (1 - ((x * a)/(x + b))) * c,
+           data = df_mod,
+           start = list(a = 1.169, b= -0.317, c = 0.7),
+           trace=T)
+summary(NlM1)
+
+```
+
+
+
+```{r model diagnostic}
+# Non linear model evaluation 
+par(mfrow = c(2, 2))
+plot(NlM1)
+```
+
+
+
+```{r}
+
+par(mfrow = c(2, 2))
+plot(NlM1)
+
+```
+
+
+```{r extract ppfd_ambient from def_infected data,include=FALSE}
+x1 <- df_infected %>% 
+  filter(Tissue_type == "infected") %>% 
+  pull(ppfd_ambient)
+
+y1 <- df_infected %>% 
+  filter(Tissue_type == "infected") %>% 
+  pull(Phi2)
+df_mod1 <- data.frame(x1,y1)
+plot(df_mod1)
+```
+
+
+```{r,prediction of Phi2 for controls given PPfd_ambient of infeceted,include=FALSE}
+df_control$Predicted_Phi2 <- predict(NlM1 ,data=df_mod1$x1)
+view(df_control)
+```
+
+
+```{r}
+df_Phi2 <- data.frame(
+  accession = df_control$accession,
+  replicate = df_control$replicate,
+  control_Phi2 = df_control$Phi2,
+  infected_Phi2 = df_infected$Phi2,
+  Predicted_Phi2 = df_control$Predicted_Phi2)
+view(df_Phi2)
+```
+
+
+
+```{r delta Phi2}
+delta_Phi2 <- data.frame(
+  delta1_Phi2 = df_Phi2$Predicted_Phi2 - df_Phi2$infected_Phi2)
+
+view(delta_Phi2)
+df_infected2 <- cbind(df_infected, delta_Phi2)  
+```
+
+
+```{r}
+
+# binding the delta Phi2 column into the entire Maseno infected df
+df_infected2 <- cbind(df_infected, delta_Phi2)  
+view(df_infected2)
+```
+
+
+```{r,feature extraction for modelling }
+
+df_infected3 <- data.frame(
+  leaf_angle = df_infected2$leaf_angle,
+  replicate = df_infected2$replicate,
+  infected_Phi2 = df_infected$rel_chl,
+  Thickness = df_infected2$Thickness,
+  ps1_active =df_infected2$ps1_active,
+  delta1_Phi2= df_infected2$delta1_Phi2,
+  blast_score = df_infected2$blast_score,
+  ambient_temp = df_infected2$ambient_temp,
+  LEF =df_infected2$LEF,
+  ambient_rh =df_infected2$ambient_rh,
+  rel_chl = df_infected2$rel_chl,
+  time_of_day = df_infected2$time_of_day)
+
+
+write.csv(df_infected3, "df_infected3.csv")
+view(df_infected3)
+```
+
+
+```{r feature exraction for model fitting}
+
+df_infected4 <- subset(df_infected3, select = - blast_score)
+df_infected5 <- subset(df_infected4, select = -replicate)
+view(df_infected5)
+
+```
+
+
+
+```{r pca plot}
+
+results <- prcomp(df_infected5, scale = TRUE)
+#view(results)
+
+
+results$rotation <- -1*results$rotation
+plot(results,type = "l")
+#view(results$rotation)
+
+results$x <- -1*results$x
+biplot(results, scale = 0)
+results$sdev^2 / sum(results$sdev^2)
+var_explained = results$sdev^2 / sum(results$sdev^2)
+```
+
+
+```{r}
+#create scree plot
+qplot(c(1:7), var_explained) + 
+  geom_line() + 
+  xlab("Principal Component") + 
+  ylab("Variance Explained") +
+  ggtitle("Scree Plot") +
+  ylim(0, 1)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
