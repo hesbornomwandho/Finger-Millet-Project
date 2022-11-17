@@ -1,0 +1,272 @@
+---
+title: "Finger Millet Multispeq Data Analyses"
+author: " Hesborn Obura"
+date: "Last compiled on `r format(Sys.time(), '%d %b %Y')`"
+output: html_document
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, encoding = encoding, output_dir = "..") })
+---
+
+```{r packages_used, include=FALSE}
+library(tidyverse)
+library(plyr)
+library(lme4)
+library(lmerTest)
+library(emmeans)
+library(minpack.lm)
+```
+
+```{r import_data, include=F}
+
+# bring in files -----------------------------------------------------------
+# move to wd
+setwd('..')
+df <- read_csv("/Users/hesborn/Desktop/Finger_Millet_Anlaysis/fingermillet_blast/data/cleaned/dataset_combined.csv")
+
+```
+
+```{r data_prep, include = F}
+
+#change categorical columns to factors
+df$accession <- as.factor(as.character(df$accession))
+df$Tissue_type <- as.factor(df$Tissue_type)
+df$User <- as.factor(df$User)
+df$device_id <- as.factor(df$device_id)
+df$location <- as.factor(df$location)
+df$blast_score <- as.factor(df$blast_score)
+df$replicate <- as.factor(df$replicate)
+
+df_kil <- df %>% 
+  filter(location == "kilifi")
+#view(df_kil)
+
+df_mas <- df %>% 
+  filter(location == "maseno")
+#view(df_mas)
+```
+
+```{r histtissue, echo = FALSE, fig.cap = "Histograms of Phi PSII from all locations, by tissue type"}
+
+#plot histograms
+ggplot(df, aes(x = Phi2)) + 
+  geom_histogram(bins = 20,
+                 size = 1.05,
+                 color = "black",
+                 fill = "#99d8c9") +
+  facet_grid(cols = vars(Tissue_type)) +
+  theme_bw()
+
+
+```
+
+```{r histppfd, echo = FALSE, fig.cap = "Histograms of light intensity (umol m^-2^ s^-1^), by location"}
+
+#plot histograms
+ggplot(df, aes(x = ppfd_ambient)) + 
+  geom_histogram(bins = 20,
+                 size = 1.05,
+                 color = "black",
+                 fill = "#9ecae1") +
+  facet_grid(cols = vars(location)) +
+  theme_bw()
+
+
+```
+
+```{r lmlabels_mas, include = F}
+
+#creat function to run linear model and create label for plotting r2 on scatterplots (credit https://stackoverflow.com/questions/19699858/ggplot-adding-regression-line-equation-and-r2-with-facet)
+lm_eqn = function(df){
+    m = lm(Phi2 ~ ppfd_ambient, df);
+    eq <- substitute(~~italic(r)^2~"="~r2, 
+                     list(r2 = format(summary(m)$r.squared, digits = 3)))
+    as.character(as.expression(eq));                 
+}
+
+#run function on maseno dataset
+eq_mas <- ddply(df_mas,.(Tissue_type),lm_eqn)
+view(eq_mas)
+
+```
+
+```{r phi2ppfdmas, echo = FALSE, fig.cap = "Phi PSII vs light intensity at Maseno"}
+
+#plot scatterplots with r2 value, facteted by tissue type
+ggplot(df_mas, aes(x = ppfd_ambient, y = Phi2)) + 
+  geom_jitter() +
+  facet_grid(cols = vars(Tissue_type)) +
+  labs(title="Maseno") +
+  geom_smooth(method='lm') +
+  geom_text(data=eq_mas, 
+            aes(x = 1600, y = 0.75,
+                label=V1), 
+            parse = TRUE, 
+            inherit.aes=FALSE) + 
+  facet_grid(cols = vars(Tissue_type))
+
+```
+
+```{r phi2ppfdkil, echo = FALSE, fig.cap = "Phi PSII vs light intensity at Kilifi"}
+
+#run linear model and label for kilifi
+eq_kil <- ddply(df_kil,.(Tissue_type),lm_eqn)
+
+#plot scatterplots
+ggplot(df_kil, aes(x = ppfd_ambient, y = Phi2)) + 
+  geom_jitter() +
+  labs(title="Kilifi (all control)") +
+  geom_smooth(method='lm') +
+  geom_text(data=eq_kil, 
+            aes(x = 1600, y = 0.75,
+                label=V1), 
+            parse = TRUE, 
+            inherit.aes=FALSE)
+
+```
+
+```{r phi2blast, echo = FALSE, fig.cap = "Phi PSII by blast score at Maseno"}
+
+#violin plots of blast score
+ggplot(df_mas, aes(x = blast_score, y = Phi2, fill = blast_score)) +
+  geom_violin(alpha = 0.5) +
+  geom_point(position = position_jitter(seed = 1, width = 0.2)) +
+  theme_bw()
+
+```
+
+```{r mixed_effect_modeling, echo=FALSE}
+# linear mixed effect model -----------------------------------
+# this probably is not useful right now
+
+lmer_phi2 <- lmer(Phi2 ~ blast_score + (1 | `replicate`) + (1 | accession),
+                  data=df_mas)
+#view summary
+summary(lmer_phi2)
+
+#view anova table
+anova(lmer_phi2)
+```
+
+```{r, echo = FALSE, fig.cap = "Estimated marginal means of Phi PSII at Maseno"}
+# generate estimated marginal means of PhiPSII by blast score from mixed effect model results.
+pairwise_phi2 <- emmeans(lmer_phi2, pairwise ~ blast_score)
+
+#plot estimated marginal means of phiPSII by blast score (this does not include any standard error or variance plotting)
+emmip(lmer_phi2, ~ blast_score, ylab = (expression(paste(phi,"PSII"))))
+
+```
+
+```{r ppfdfittingcontrol, echo = FALSE, include = FALSE}
+
+#The next sections are progress toward fitting a hyperbola to the PhiSPII / Light intensity relationship in order to account for that relationship in our mixed effect model.
+
+# extract x (ppfd) and y (phi2) values for curve fitting
+# using maseno, control only
+x <- df_mas %>% 
+  filter(Tissue_type == "control") %>% 
+  pull(ppfd_ambient)
+view(x)
+
+y <- df_mas %>%
+  filter(Tissue_type == "control") %>% 
+  pull(Phi2)
+
+#put into dataframe
+df_mod <- data.frame(x,y)
+
+#view plot of ppfd vs phipsii
+plot(df_mod)
+
+```
+
+```{r ppfdfitting_findstart, echo = FALSE, include = FALSE}
+
+# We need to find starting parameters for the hyperbola model; typically log transforming the linear relationship of variables should get us close.
+
+# find reasonable starting values for a & b from linear model of log x & y
+xlog <- log(df_mod$x)
+ylog<- log(df_mod$y)
+df_log <- data.frame(xlog, ylog)
+
+#view log transformed plot
+plot(df_log) 
+
+```
+
+```{r loglinearmodel, include = FALSE}
+#run linear model on log transformed data
+lmod <- lm(ylog ~ xlog, data = df_log)
+
+#view summary. Can use intercept and slope for starting estimates of a & b in nonlinear model
+summary(lmod)
+
+```
+
+```{r, echo = FALSE}
+
+#develop model that (hopefully) fits phi psii x ppfd relationship
+m <- nlsLM(y ~ (1 - ((x * a)/(x + b))) * c,
+           data = df_mod,
+           start = list(a = 1.157, b= -0.313, c = 0.7),
+           trace=T)
+??nlsLM
+summary(m)
+```
+
+```{r phi2ppfdcontrolplot, echo = FALSE, fig.cap = "Fitted nonlinear model line over Maseno control Phi PSII vs PPFD"}
+
+#plot model prediction on original data
+y_est <- predict(m, df_mod$x)
+i <- order(x) # force order to be based on ppfd values (otherwise plot lines will be a mess)
+
+plot(x,y,
+     xlab = "PPFD",
+     ylab = "PhiPSII")
+
+#add fit line to plot
+lines(x[i], y_est[i], col = "red")
+
+```
+
+```{r ppfdfittinghealthy, echo = FALSE, include = FALSE}
+
+# extract x (ppfd) and y (phi2) values for curve fitting
+# using maseno, healthy only
+x <- df_mas %>% 
+  filter(Tissue_type == "healthy") %>% 
+  pull(ppfd_ambient)
+
+y <- df_mas %>%
+  filter(Tissue_type == "healthy") %>% 
+  pull(Phi2)
+
+df_mod <- data.frame(x,y)
+
+plot(df_mod)
+
+```
+
+```{r, echo = FALSE}
+
+#develop model that (hopefully) fits phi psii x ppfd relationship
+#using same starting values as above for control
+m <- nlsLM(y ~ (1 - ((x * a)/(x + b))) * c,
+           data = df_mod,
+           start = list(a = 1.157, b= -0.313, c = 0.7),
+           trace=T)
+
+summary(m)
+```
+
+```{r phi2ppfdhealthyplot, echo = FALSE, fig.cap = "Fitted nonlinear model line over Maseno healthy Phi PSII vs PPFD"}
+
+#plot model prediction on original data
+y_est <- predict(m, df_mod$x)
+view(y_est)
+i <- order(x) #make order based on ppfd values (otherwise plot lines will be a mess)
+plot(x,y,
+     xlab = "PPFD",
+     ylab = "PhiPSII")
+lines(x[i], y_est[i], col = "red")
+
+```
