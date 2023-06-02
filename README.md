@@ -5,3 +5,13 @@ Most of the farmers use unimproved varieties which are vulnerable to biotic and 
 Artificial intelligence (AI) techniques like machine learning and deep learning have transformed agriculture into "smart" agriculture by enabling the development of effective early crop disease detection tools. These methods can accurately and quickly identify crop diseases because they are fully automated. Smart agriculture has been adopted in recent years to increase yield.
 
 By utilizing Chl-F and analyzing images of finger millet, this project advances knowledge on the application of AI techniques which aids in the early detection of blast disease in finger millet.
+
+# Main Objective
+
+ Use of machine learning and cholorophyll flourence to score finger millet blast diease 
+
+# Specific Objectives
+
+1.	To develop a machine learning model using chlorophyll fluorescence parameters to score blast disease levels in finger millet.
+2.	To develop a machine learning model for robust scoring of blast disease images in finger millet.
+
