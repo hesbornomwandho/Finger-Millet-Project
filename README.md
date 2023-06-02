@@ -17,4 +17,7 @@ By utilizing Chl-F and analyzing images of finger millet, this project advances 
 
 # Machine learning workflow
 
+![image](https://github.com/hesbornomwandho/Finger-Millet-Project/assets/72735085/4cab358d-aac6-43f4-a84a-bdf07642109c)
+
+
 ![image](https://github.com/hesbornomwandho/Finger-Millet-Project/assets/72735085/74a6469b-fc5d-47ed-8a16-03bdd272868d)
